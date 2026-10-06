@@ -1,2 +1,43 @@
+# macOS
 .DS_Store
 *.log
+._*
+
+# Firebase 認証情報（コミット禁止）
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart
+*firebase-adminsdk*.json
+firebase.json
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/generated_plugin_registrant.*
+**/generated_plugins.cmake
+**/GeneratedPluginRegistrant.swift
+**/*.g.dart
+**/*.freezed.dart
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Podfile.lock
+ios/Flutter/App.framework
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/Flutter/Generated.xcconfig
+ios/Runner/GeneratedPluginRegistrant.h
+ios/Runner/GeneratedPluginRegistrant.m
+ios/Runner/Runner.entitlements
+
+# macOS runner
+macos/Pods/
+macos/Podfile.lock
+macos/Runner/GoogleService-Info.plist
+
+# Android
+android/

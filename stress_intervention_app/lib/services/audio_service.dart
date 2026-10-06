@@ -1,4 +1,5 @@
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/widgets.dart';
 
 class AudioService {
   static final AudioService _instance = AudioService._internal();
@@ -21,9 +22,9 @@ class AudioService {
       // assets/audio/relax_music.wav の場合は 'audio/relax_music.wav' を指定します。
       await _audioPlayer.play(AssetSource('audio/relax_music.wav'));
       _isPlaying = true;
-      print('Audio started playing: relax_music.wav');
+      debugPrint('Audio started playing: relax_music.wav');
     } catch (e) {
-      print('Error playing audio: $e');
+      debugPrint('Error playing audio: $e');
     }
   }
 
@@ -32,9 +33,9 @@ class AudioService {
     try {
       await _audioPlayer.pause();
       _isPlaying = false;
-      print('Audio paused');
+      debugPrint('Audio paused');
     } catch (e) {
-      print('Error pausing audio: $e');
+      debugPrint('Error pausing audio: $e');
     }
   }
 
@@ -43,9 +44,9 @@ class AudioService {
     try {
       await _audioPlayer.stop();
       _isPlaying = false;
-      print('Audio stopped');
+      debugPrint('Audio stopped');
     } catch (e) {
-      print('Error stopping audio: $e');
+      debugPrint('Error stopping audio: $e');
     }
   }
 
@@ -54,7 +55,7 @@ class AudioService {
     try {
       await _audioPlayer.setVolume(volume);
     } catch (e) {
-      print('Error setting volume: $e');
+      debugPrint('Error setting volume: $e');
     }
   }
 
@@ -63,7 +64,7 @@ class AudioService {
     try {
       await _audioPlayer.setReleaseMode(loop ? ReleaseMode.loop : ReleaseMode.release);
     } catch (e) {
-      print('Error setting loop mode: $e');
+      debugPrint('Error setting loop mode: $e');
     }
   }
 

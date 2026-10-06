@@ -1,10 +1,43 @@
 import 'package:flutter/material.dart';
 import 'screens/dashboard_screen.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
+import 'package:stress_intervention_app/services/firebase_service.dart' as my_service;
+import 'package:stress_intervention_app/services/api_service.dart';
 
-void main() {
+
+void main() async {
   // Widgetバインディングの初期化
   WidgetsFlutterBinding.ensureInitialized();
   
+  // firebaseの初期化
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // Realtime Databaseの監視を開始
+  await my_service.FirebaseService.instance.initialize(
+    databaseUrl: 'https://expt-d5356-default-rtdb.asia-southeast1.firebasedatabase.app/',
+    path: 'music_control', // 監視するキーパス
+    onStressStatusChanged: (bool isStressActive) async {
+      debugPrint('【通知受信】Firebaseのmusic_controlが変化しました: $isStressActive');
+
+      if (isStressActive) {
+        // ストレスを検出した場合（true）、flaskサーバー経由でMongoDBにログを送信
+        bool success = await ApiService().logStressEvent(
+          eventType: 'stress_received',
+          extraData: {'description': 'Firebase music_control turned ON'},
+        );
+
+        if (success) {
+          debugPrint('Flask/MongoDB への書き込みに成功しました');
+        } else {
+          debugPrint('Flask/MongoDB への書き込みに失敗しました。URLやネットワークを確認してください。');
+        }
+      }
+    }
+  );
+
   runApp(const StressInterventionApp());
 }
 

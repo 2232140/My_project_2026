@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/cupertino.dart';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
   factory FirebaseService() => _instance;
   FirebaseService._internal();
+
+  static FirebaseService get instance => _instance;
 
   DatabaseReference? _dbRef;
   StreamSubscription<DatabaseEvent>? _subscription;
@@ -60,15 +63,15 @@ class FirebaseService {
           }
         },
         onError: (error) {
-          print('Firebase Database Error: $error');
+          debugPrint('Firebase Database Error: $error');
           // エラー時でもアプリがクラッシュしないようにハンドリング
         },
       );
-      print('Firebase Realtime Database listener initialized at path: $path');
+      debugPrint('Firebase Realtime Database listener initialized at path: $path');
     } catch (e) {
       _isInitialized = false;
-      print('Failed to initialize Firebase: $e');
-      print('Please configure your google-services.json / GoogleService-Info.plist');
+      debugPrint('Failed to initialize Firebase: $e');
+      debugPrint('Please configure your google-services.json / GoogleService-Info.plist');
     }
   }
 

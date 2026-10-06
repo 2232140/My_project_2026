@@ -1,29 +1,55 @@
 import 'dart:async';
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/firebase_service.dart';
 import '../services/api_service.dart';
 import '../services/audio_service.dart';
+import '../services/health_service.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({Key? key}) : super(key: key);
+  const DashboardScreen({super.key});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
 class _DashboardScreenState extends State<DashboardScreen> with TickerProviderStateMixin {
+  // 定期送信の間隔（分）
+  static const int _sendIntervalMinutes = 5;
+
+  // ポーリングの間隔（秒）
+  static const int _pollIntervalSeconds = 30;
+
   // サービスインスタンス
   final FirebaseService _firebaseService = FirebaseService();
   final ApiService _apiService = ApiService();
   final AudioService _audioService = AudioService();
+  final HealthService _healthService = HealthService();
+
+  // ヘルスデータ状態
+  Map<String, dynamic>? _healthData;
+  bool _isLoadingHealth = false;
+  bool _healthPermissionsGranted = false;
+
+  // 定期送信状態
+  Timer? _healthSendTimer;
+  bool _isSendingPeriodically = false;
+
+  // ポーリング状態
+  Timer? _pollingTimer;
+  bool _isPollingActive = false;
+
+  // 参加者ID
+  final TextEditingController _participantIdController = TextEditingController(text: 'participant_001');
 
   // 設定用コントローラー
   final TextEditingController _firebaseUrlController = TextEditingController(
-    text: 'https://your-project-id.firebaseio.com',
+    text: 'https://expt-d5356-default-rtdb.asia-southeast1.firebasedatabase.app/',
   );
   final TextEditingController _firebasePathController = TextEditingController(
-    text: 'stress_control/active',
+    text: 'music_control',
   );
   final TextEditingController _flaskUrlController = TextEditingController(
     text: 'http://localhost:5000',
@@ -33,6 +59,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   bool _isStressActive = false;
   bool _isPlayingMusic = false;
   bool _isFirebaseListening = false;
+  Timer? _musicTimer; // 音楽の自動停止用タイマー
   
   // 送信ログ履歴
   final List<Map<String, dynamic>> _logs = [];
@@ -45,6 +72,19 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   @override
   void initState() {
     super.initState();
+
+    // 画面が起動したら、3秒後にfirebaseの監視をスタート
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted && !_isFirebaseListening) {
+        _toggleFirebaseListener();
+      }
+    });
+
+    // ヘルスケア権限の要求と初回データ取得
+    _initHealth();
+
+    // 設定を読み込み、自動起動する
+    _loadSettings();
     
     // ストレス時の鼓動アニメーション
     _stressPulseController = AnimationController(
@@ -73,13 +113,123 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   @override
   void dispose() {
+    _musicTimer?.cancel();
+    _healthSendTimer?.cancel();
+    _pollingTimer?.cancel();
     _stressPulseController.dispose();
     _equalizerController.dispose();
     _firebaseUrlController.dispose();
     _firebasePathController.dispose();
     _flaskUrlController.dispose();
+    _participantIdController.dispose();
     _firebaseService.dispose();
     super.dispose();
+  }
+
+  // 参加者ID・Flask URLをSharedPreferencesから読み込み、自動起動する
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedId = prefs.getString('participant_id');
+    if (savedId != null && savedId.isNotEmpty && mounted) {
+      setState(() => _participantIdController.text = savedId);
+    }
+
+    final savedUrl = prefs.getString('flask_url');
+    if (savedUrl != null && savedUrl.isNotEmpty && mounted) {
+      setState(() => _flaskUrlController.text = savedUrl);
+    }
+
+    // HealthKit権限取得を待ってから自動起動（5秒後）
+    Future.delayed(const Duration(seconds: 5), () {
+      if (mounted) {
+        _startPeriodicHealthSend();
+        _startPolling();
+      }
+    });
+  }
+
+  // 参加者ID・Flask URLをSharedPreferencesに保存する
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('participant_id', _participantIdController.text.trim());
+    await prefs.setString('flask_url', _flaskUrlController.text.trim());
+    _addLog('設定', '参加者ID・FlaskURLを保存しました', true);
+  }
+
+  // 定期送信を開始する（_sendIntervalMinutes 分ごと）
+  void _startPeriodicHealthSend() {
+    _apiService.setBaseUrl(_flaskUrlController.text.trim());
+    _addLog('定期送信', '$_sendIntervalMinutes分ごとの送信を開始しました', true);
+
+    // 即時1回送信してから定期実行
+    _fetchAndSendHealthData();
+    _healthSendTimer = Timer.periodic(
+      Duration(minutes: _sendIntervalMinutes),
+      (_) => _fetchAndSendHealthData(),
+    );
+    setState(() => _isSendingPeriodically = true);
+  }
+
+  // 定期送信を停止する
+  void _stopPeriodicHealthSend() {
+    _healthSendTimer?.cancel();
+    _healthSendTimer = null;
+    setState(() => _isSendingPeriodically = false);
+    _addLog('定期送信', '定期送信を停止しました', true);
+  }
+
+  // ヘルスデータを取得してFlaskに送信する（1回分）
+  Future<void> _fetchAndSendHealthData() async {
+    final userId = _participantIdController.text.trim();
+    if (userId.isEmpty) {
+      _addLog('定期送信', '参加者IDが未設定です。設定パネルで入力してください', false);
+      return;
+    }
+
+    // データ取得
+    final data = await _healthService.fetchRecentData();
+    if (mounted) setState(() => _healthData = data);
+
+    // Flask へ送信
+    _addLog('定期送信', '[$userId] データ送信中...', true);
+    _apiService.setBaseUrl(_flaskUrlController.text.trim());
+    final success = await _apiService.sendHealthData(
+      userId: userId,
+      healthData: data,
+    );
+
+    final hr = data['heart_rate']?.toStringAsFixed(0) ?? '---';
+    final steps = data['steps']?.toString() ?? '---';
+    if (success) {
+      _addLog('定期送信', '[$userId] 送信成功 HR:${hr}bpm 歩数:$steps', true);
+    } else {
+      _addLog('定期送信', '[$userId] 送信失敗 (FlaskサーバーのURLと起動状況を確認)', false);
+    }
+  }
+
+  // ヘルスケアの権限要求と初回データ取得
+  Future<void> _initHealth() async {
+    final granted = await _healthService.requestPermissions();
+    if (!mounted) return;
+    setState(() => _healthPermissionsGranted = granted);
+    if (granted) {
+      await _refreshHealthData();
+    }
+  }
+
+  // ヘルスデータの更新
+  Future<void> _refreshHealthData() async {
+    if (!mounted) return;
+    setState(() => _isLoadingHealth = true);
+    final data = await _healthService.fetchRecentData();
+    if (!mounted) return;
+    setState(() {
+      _healthData = data;
+      _isLoadingHealth = false;
+    });
+    final src = data['heart_rate_source'] != null ? ' (${data['heart_rate_source']})' : '';
+    _addLog('ヘルスケア', 'HR: ${data['heart_rate']?.toStringAsFixed(0) ?? '---'} bpm$src, 歩数: ${data['steps'] ?? '---'} 歩', !data.containsKey('error'));
   }
 
   // ログを追加するヘルパー
@@ -130,8 +280,59 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     }
   }
 
+  // ポーリングを開始する
+  void _startPolling() {
+    _apiService.setBaseUrl(_flaskUrlController.text.trim());
+    _addLog('ポーリング', '$_pollIntervalSeconds秒ごとの介入命令チェックを開始しました', true);
+    _checkForIntervention(); // 即時1回実行
+    _pollingTimer = Timer.periodic(
+      Duration(seconds: _pollIntervalSeconds),
+      (_) => _checkForIntervention(),
+    );
+    setState(() => _isPollingActive = true);
+  }
+
+  // ポーリングを停止する
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+    setState(() => _isPollingActive = false);
+    _addLog('ポーリング', 'ポーリングを停止しました', true);
+  }
+
+  // Flask に介入命令がないかチェック（ポーリング1回分）
+  Future<void> _checkForIntervention() async {
+    final userId = _participantIdController.text.trim();
+    if (userId.isEmpty) return;
+
+    _apiService.setBaseUrl(_flaskUrlController.text.trim());
+    final result = await _apiService.checkIntervention(userId: userId);
+
+    if (result['has_command'] == true) {
+      final command = result['command'] as String?;
+      final commandId = result['command_id'] as String?;
+
+      _addLog('ポーリング', '介入命令を受信: $command (ID: $commandId)', true);
+
+      // 命令をACK済みにする
+      if (commandId != null) {
+        await _apiService.acknowledgeIntervention(
+          commandId: commandId,
+          userId: userId,
+        );
+      }
+
+      // 命令に応じた処理
+      if (command == 'stress_on') {
+        _handleStressStatusChange(true, isSimulated: false, sourceLabel: 'Flaskポーリング');
+      } else if (command == 'stress_off') {
+        _handleStressStatusChange(false, isSimulated: false, sourceLabel: 'Flaskポーリング');
+      }
+    }
+  }
+
   // ストレス状態の変化ハンドラ
-  void _handleStressStatusChange(bool isActive, {required bool isSimulated}) {
+  void _handleStressStatusChange(bool isActive, {required bool isSimulated, String? sourceLabel}) {
     if (isActive == _isStressActive) return; // 状態が変わらなければスルー
 
     setState(() {
@@ -144,7 +345,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       }
     });
 
-    final source = isSimulated ? 'シミュレーション' : 'Firebase';
+    final source = sourceLabel ?? (isSimulated ? 'シミュレーション' : 'Firebase');
     _addLog(source, 'ストレス状態変化検知: ${isActive ? "ON" : "OFF"}', true);
 
     if (_isStressActive) {
@@ -236,15 +437,39 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   // 音楽再生
   void _playMusic() async {
+    // すでにタイマーが動いていたら一度リセットする
+    _musicTimer?.cancel();
+
     await _audioService.setLoop(true);
     await _audioService.playRelaxMusic();
     _addLog('音楽再生', 'リラックス音楽の再生を開始しました', true);
+
+    // 指定時間（テスト用に15秒に設定）で自動停止するタイマーを開始
+  _musicTimer = Timer(const Duration(seconds: 15), () {
+    _addLog('介入システム', '制限時間に達したため、音楽を自動停止します', true);
+    _stopMusic(reason: 'auto_timeout'); // 自動停止のログを送る
+    });
   }
 
   // 音楽停止
-  void _stopMusic() async {
+  void _stopMusic({String reason = 'manual_user'}) async {
+    // 動いているタイマーを止める
+    _musicTimer?.cancel();
+    _musicTimer = null;
+    
     await _audioService.stop();
     _addLog('音楽再生', '音楽を停止しました', true);
+
+    // Firebaseの値を自動で false にリセットする
+    await FirebaseDatabase.instance
+      .ref(_firebasePathController.text.trim())
+      .set(false);
+
+    // 音楽が止まった瞬間のログを　Flask → MongoDB へ送信する
+    _sendEventToFlask('music_stopped', extraData: {
+      'reason': reason, // manual_user（手動）か auto_timeout（自動）かを記録
+      'descriptioin': 'Music playback has ended'
+    });
   }
 
   @override
@@ -265,22 +490,164 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. ストレスステータスパネル（アニメーション付き）
+            // 1. 生体データパネル（HealthKit / Health Connect）
+            _buildHealthDataPanel(),
+            const SizedBox(height: 16),
+
+            // 2. ストレスステータスパネル（アニメーション付き）
             _buildStatusPanel(),
             const SizedBox(height: 16),
-            
-            // 2. 音楽プレイヤー
+
+            // 3. 音楽プレイヤー
             _buildPlayerPanel(),
             const SizedBox(height: 16),
 
-            // 3. 設定パネル (Firebase & Flask)
+            // 4. 設定パネル (Firebase & Flask)
             _buildSettingsPanel(),
             const SizedBox(height: 16),
 
-            // 4. イベント・通信ログ
+            // 5. イベント・通信ログ
             _buildLogsPanel(),
           ],
         ),
+      ),
+    );
+  }
+
+  // 0. 生体データパネルのUI構築（HealthKit / Health Connect）
+  Widget _buildHealthDataPanel() {
+    final hr = _healthData?['heart_rate'] as double?;
+    final steps = _healthData?['steps'] as int?;
+    final measuredAt = _healthData?['measured_at'] as String?;
+    final hasError = _healthData?.containsKey('error') ?? false;
+
+    return Card(
+      color: const Color(0xFF1E293B),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  '生体データ (ヘルスケア連携)',
+                  style: TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                if (_isLoadingHealth)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFF10B981),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (!_healthPermissionsGranted) ...[
+              const Text(
+                'ヘルスケアへのアクセス許可が必要です',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  minimumSize: const Size.fromHeight(44),
+                ),
+                onPressed: () async {
+                  final granted = await _healthService.requestPermissions();
+                  if (mounted) setState(() => _healthPermissionsGranted = granted);
+                  if (granted) _refreshHealthData();
+                },
+                icon: const Icon(Icons.health_and_safety, color: Colors.white),
+                label: const Text('許可を要求する', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ] else ...[
+              if (hasError)
+                const Text(
+                  'データ取得に失敗しました。ヘルスケアアプリにデータが存在するか確認してください。',
+                  style: TextStyle(color: Colors.amber, fontSize: 12),
+                )
+              else
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _buildMetricTile(
+                      icon: Icons.favorite_rounded,
+                      label: '心拍数',
+                      value: hr != null ? '${hr.toStringAsFixed(0)} bpm' : '---',
+                      color: Colors.redAccent,
+                    ),
+                    _buildMetricTile(
+                      icon: Icons.directions_walk_rounded,
+                      label: '歩数（今日）',
+                      value: steps != null ? '$steps 歩' : '---',
+                      color: const Color(0xFF10B981),
+                    ),
+                  ],
+                ),
+              if (measuredAt != null) ...[
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    '最終取得: ${measuredAt.substring(11, 19)}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF10B981)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: _isLoadingHealth ? null : _refreshHealthData,
+                  icon: const Icon(Icons.refresh_rounded, color: Color(0xFF10B981), size: 18),
+                  label: const Text('データを更新', style: TextStyle(color: Color(0xFF10B981))),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  // 指標タイルウィジェット
+  Widget _buildMetricTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 28),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(color: color, fontSize: 20, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+        ],
       ),
     );
   }
@@ -303,12 +670,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
-            color: statusColor.withOpacity(0.5),
+            color: statusColor.withValues(alpha: 0.5),
             width: _isStressActive ? 2 : 1,
           ),
         ),
         elevation: _isStressActive ? 12 : 4,
-        shadowColor: statusColor.withOpacity(0.3),
+        shadowColor: statusColor.withValues(alpha: 0.3),
         child: Padding(
           padding: const EdgeInsets.all(20.0),
           child: Column(
@@ -328,7 +695,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (_isFirebaseListening ? const Color(0xFF10B981) : Colors.amber).withOpacity(0.5),
+                          color: (_isFirebaseListening ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.5),
                           blurRadius: 6,
                           spreadRadius: 2,
                         )
@@ -421,7 +788,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                       color: const Color(0xFF0F172A),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: const Color(0xFF10B981).withOpacity(0.5),
+                        color: const Color(0xFF10B981).withValues(alpha: 0.5),
                         width: 1.5,
                       ),
                     ),
@@ -517,6 +884,79 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
         ),
         childrenPadding: const EdgeInsets.all(16.0),
         children: [
+          // 参加者ID
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _participantIdController,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    labelText: '参加者ID (例: participant_001)',
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    filled: true,
+                    fillColor: const Color(0xFF0F172A),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                ),
+                onPressed: _saveSettings,
+                child: const Text('保存', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // 定期送信 ON/OFF ボタン
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isSendingPeriodically ? Colors.orange : const Color(0xFF10B981),
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: _isSendingPeriodically ? _stopPeriodicHealthSend : _startPeriodicHealthSend,
+            icon: Icon(
+              _isSendingPeriodically ? Icons.stop_circle_outlined : Icons.send_rounded,
+              color: Colors.white,
+            ),
+            label: Text(
+              _isSendingPeriodically
+                  ? '定期送信 停止中... ($_sendIntervalMinutes分ごと)'
+                  : '定期送信 開始 ($_sendIntervalMinutes分ごと)',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          // 介入命令ポーリング ON/OFF ボタン
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _isPollingActive ? Colors.deepPurple : const Color(0xFF334155),
+              minimumSize: const Size.fromHeight(48),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: _isPollingActive ? _stopPolling : _startPolling,
+            icon: Icon(
+              _isPollingActive ? Icons.sync_disabled_rounded : Icons.sync_rounded,
+              color: Colors.white,
+            ),
+            label: Text(
+              _isPollingActive
+                  ? '介入命令ポーリング 停止 ($_pollIntervalSeconds秒ごと)'
+                  : '介入命令ポーリング 開始 ($_pollIntervalSeconds秒ごと)',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+            ),
+          ),
+          const Divider(color: Colors.white12, height: 24),
+
           // Firebase DB URL
           TextField(
             controller: _firebaseUrlController,
