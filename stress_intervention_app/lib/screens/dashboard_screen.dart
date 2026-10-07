@@ -487,9 +487,20 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     // 動いているタイマーを止める
     _musicTimer?.cancel();
     _musicTimer = null;
-    
+
     await _audioService.stop();
     _addLog('音楽再生', '音楽を停止しました', true);
+
+    // _isStressActive をリセットする
+    // これをしないと次の stress_on 通知が _handleStressStatusChange のガード条件に
+    // 引っかかって（isActive == _isStressActive）処理されなくなる
+    if (mounted && _isStressActive) {
+      setState(() {
+        _isStressActive = false;
+        _stressPulseController.stop();
+        _stressPulseController.reset();
+      });
+    }
 
     // Firebaseの値を自動で false にリセットする
     await FirebaseDatabase.instance
