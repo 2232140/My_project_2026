@@ -41,6 +41,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   Timer? _pollingTimer;
   bool _isPollingActive = false;
 
+  // UIリアルタイム更新タイマー（送信とは独立して30秒ごとに表示を更新）
+  Timer? _uiRefreshTimer;
+  static const int _uiRefreshIntervalSeconds = 30;
+
   // 参加者ID
   final TextEditingController _participantIdController = TextEditingController(text: 'participant_001');
 
@@ -117,6 +121,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     _musicTimer?.cancel();
     _healthSendTimer?.cancel();
     _pollingTimer?.cancel();
+    _uiRefreshTimer?.cancel();
     _stressPulseController.dispose();
     _equalizerController.dispose();
     _firebaseUrlController.dispose();
@@ -146,6 +151,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       if (mounted) {
         _startPeriodicHealthSend();
         _startPolling();
+        _startUiRefreshTimer();
       }
     });
   }
@@ -183,6 +189,15 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     _healthSendTimer = null;
     setState(() => _isSendingPeriodically = false);
     _addLog('定期送信', '定期送信を停止しました', true);
+  }
+
+  // UIリアルタイム更新タイマーを開始する（Flaskへの送信は行わず表示のみ更新）
+  void _startUiRefreshTimer() {
+    _uiRefreshTimer?.cancel();
+    _uiRefreshTimer = Timer.periodic(
+      Duration(seconds: _uiRefreshIntervalSeconds),
+      (_) => _refreshHealthData(),
+    );
   }
 
   // ヘルスデータを取得してFlaskに送信する（1回分）
