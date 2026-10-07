@@ -16,10 +16,10 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> with TickerProviderStateMixin {
-  // 定期送信の間隔（分）
-  static const int _sendIntervalMinutes = 5;
+  // 定期送信の間隔（分） ※テスト時: 1  本番: 5
+  static const int _sendIntervalMinutes = 1;
 
-  // ポーリングの間隔（秒）
+  // ポーリングの間隔（秒） ※テスト時: 30  本番: 30
   static const int _pollIntervalSeconds = 30;
 
   // サービスインスタンス
