@@ -196,7 +196,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     _uiRefreshTimer?.cancel();
     _uiRefreshTimer = Timer.periodic(
       Duration(seconds: _uiRefreshIntervalSeconds),
-      (_) => _refreshHealthData(),
+      (_) => _refreshHealthData(silent: true),
     );
   }
 
@@ -240,7 +240,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   }
 
   // ヘルスデータの更新
-  Future<void> _refreshHealthData() async {
+  // silent=true のときはログを出力しない（UIリフレッシュタイマーからの呼び出し用）
+  Future<void> _refreshHealthData({bool silent = false}) async {
     if (!mounted) return;
     setState(() => _isLoadingHealth = true);
     final data = await _healthService.fetchRecentData();
@@ -249,8 +250,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       _healthData = data;
       _isLoadingHealth = false;
     });
-    final src = data['heart_rate_source'] != null ? ' (${data['heart_rate_source']})' : '';
-    _addLog('ヘルスケア', 'HR: ${data['heart_rate']?.toStringAsFixed(0) ?? '---'} bpm$src, 歩数: ${data['steps'] ?? '---'} 歩', !data.containsKey('error'));
+    if (!silent) {
+      final src = data['heart_rate_source'] != null ? ' (${data['heart_rate_source']})' : '';
+      _addLog('ヘルスケア', 'HR: ${data['heart_rate']?.toStringAsFixed(0) ?? '---'} bpm$src, 歩数: ${data['steps'] ?? '---'} 歩', !data.containsKey('error'));
+    }
   }
 
   // ログを追加するヘルパー
