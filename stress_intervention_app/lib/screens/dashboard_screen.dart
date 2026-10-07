@@ -78,12 +78,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   void initState() {
     super.initState();
 
-    // 画面が起動したら、3秒後にfirebaseの監視をスタート
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted && !_isFirebaseListening) {
-        _toggleFirebaseListener();
-      }
-    });
+    // Firebase監視は現在未使用（ポーリング方式に移行済み）
+    // Future.delayed(const Duration(seconds: 3), () {
+    //   if (mounted && !_isFirebaseListening) {
+    //     _toggleFirebaseListener();
+    //   }
+    // });
 
     // ヘルスケア権限の要求と初回データ取得
     _initHealth();
@@ -491,10 +491,9 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     await _audioService.stop();
     _addLog('音楽再生', '音楽を停止しました', true);
 
-    // _isStressActive をリセットする
-    // これをしないと次の stress_on 通知が _handleStressStatusChange のガード条件に
-    // 引っかかって（isActive == _isStressActive）処理されなくなる
-    if (mounted && _isStressActive) {
+    // _isStressActive をリセットしてUI表示を「通常状態」に戻す
+    // ガード条件（_isStressActive チェック）を除去し、常に setState を実行する
+    if (mounted) {
       setState(() {
         _isStressActive = false;
         _stressPulseController.stop();
@@ -733,11 +732,11 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
-                      color: _isFirebaseListening ? const Color(0xFF10B981) : Colors.amber,
+                      color: _isPollingActive ? const Color(0xFF10B981) : Colors.amber,
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: (_isFirebaseListening ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.5),
+                          color: (_isPollingActive ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.5),
                           blurRadius: 6,
                           spreadRadius: 2,
                         )
@@ -771,8 +770,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
                 textAlign: TextAlign.center,
               ),
               
-              // シミュレーターボタン
-              if (!_isFirebaseListening) ...[
+              // シミュレーターボタン（常に表示）
+              if (true) ...[
                 const Divider(color: Colors.white12, height: 24),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -971,8 +970,8 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
             ),
             label: Text(
               _isSendingPeriodically
-                  ? '定期送信 停止中... ($_sendIntervalMinutes分ごと)'
-                  : '定期送信 開始 ($_sendIntervalMinutes分ごと)',
+                  ? '定期送信を停止する ($_sendIntervalMinutes分ごと)'
+                  : '定期送信を開始する ($_sendIntervalMinutes分ごと)',
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
             ),
           ),
@@ -1041,19 +1040,19 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
           ),
           const SizedBox(height: 16),
 
-          // Firebaseの監視切り替えボタン
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _isFirebaseListening ? Colors.redAccent : const Color(0xFF10B981),
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: _toggleFirebaseListener,
-            child: Text(
-              _isFirebaseListening ? 'Firebase 監視を停止する' : 'Firebase 監視を開始する',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
-            ),
-          ),
+          // Firebase監視ボタン（未使用のためコメントアウト。ポーリング方式に移行済み）
+          // ElevatedButton(
+          //   style: ElevatedButton.styleFrom(
+          //     backgroundColor: _isFirebaseListening ? Colors.redAccent : const Color(0xFF10B981),
+          //     minimumSize: const Size.fromHeight(48),
+          //     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          //   ),
+          //   onPressed: _toggleFirebaseListener,
+          //   child: Text(
+          //     _isFirebaseListening ? 'Firebase 監視を停止する' : 'Firebase 監視を開始する',
+          //     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+          //   ),
+          // ),
         ],
       ),
     );
@@ -1097,7 +1096,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
               child: _logs.isEmpty
                 ? const Center(
                     child: Text(
-                      'ログはありません。\nFirebaseを起動するか、シミュレートしてください。',
+                      'ログはありません。\n定期送信・ポーリングを開始するか、シミュレートしてください。',
                       style: TextStyle(color: Colors.white24, fontSize: 13),
                       textAlign: TextAlign.center,
                     ),
