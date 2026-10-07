@@ -250,10 +250,11 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       _healthData = data;
       _isLoadingHealth = false;
     });
-    if (!silent) {
-      final src = data['heart_rate_source'] != null ? ' (${data['heart_rate_source']})' : '';
-      _addLog('ヘルスケア', 'HR: ${data['heart_rate']?.toStringAsFixed(0) ?? '---'} bpm$src, 歩数: ${data['steps'] ?? '---'} 歩', !data.containsKey('error'));
-    }
+    // ヘルスケアログはログパネルに出さない
+    // if (!silent) {
+    //   final src = data['heart_rate_source'] != null ? ' (${data['heart_rate_source']})' : '';
+    //   _addLog('ヘルスケア', 'HR: ${data['heart_rate']?.toStringAsFixed(0) ?? '---'} bpm$src, 歩数: ${data['steps'] ?? '---'} 歩', !data.containsKey('error'));
+    // }
   }
 
   // ログを追加するヘルパー
