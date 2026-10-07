@@ -51,8 +51,9 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   final TextEditingController _firebasePathController = TextEditingController(
     text: 'music_control',
   );
+  // iPhoneからはMacのIPアドレスを指定する（localhostはiPhone自身を指すため使えない）
   final TextEditingController _flaskUrlController = TextEditingController(
-    text: 'http://localhost:5000',
+    text: '',
   );
 
   // 状態管理
@@ -159,7 +160,12 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
 
   // 定期送信を開始する（_sendIntervalMinutes 分ごと）
   void _startPeriodicHealthSend() {
-    _apiService.setBaseUrl(_flaskUrlController.text.trim());
+    final url = _flaskUrlController.text.trim();
+    if (url.isEmpty || url.contains('localhost')) {
+      _addLog('定期送信', 'Flask URL を設定してください（例: http://192.168.x.x:5000）', false);
+      return;
+    }
+    _apiService.setBaseUrl(url);
     _addLog('定期送信', '$_sendIntervalMinutes分ごとの送信を開始しました', true);
 
     // 即時1回送信してから定期実行
