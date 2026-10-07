@@ -63,7 +63,7 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   // 状態管理
   bool _isStressActive = false;
   bool _isPlayingMusic = false;
-  bool _isFirebaseListening = false;
+  // bool _isFirebaseListening = false; // Firebase未使用のためコメントアウト
   Timer? _musicTimer; // 音楽の自動停止用タイマー
   
   // 送信ログ履歴
@@ -271,39 +271,30 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
     }
   }
 
-  // Firebaseの監視開始/停止
-  void _toggleFirebaseListener() async {
-    if (_isFirebaseListening) {
-      await _firebaseService.dispose();
-      setState(() {
-        _isFirebaseListening = false;
-      });
-      _addLog('Firebase', '監視を停止しました', true);
-    } else {
-      _addLog('Firebase', '接続初期化中...', true);
-      
-      // ユーザー設定の適用
-      _apiService.setBaseUrl(_flaskUrlController.text.trim());
-
-      await _firebaseService.initialize(
-        databaseUrl: _firebaseUrlController.text.trim(),
-        path: _firebasePathController.text.trim(),
-        onStressStatusChanged: (bool isActive) {
-          _handleStressStatusChange(isActive, isSimulated: false);
-        },
-      );
-
-      setState(() {
-        _isFirebaseListening = _firebaseService.isInitialized;
-      });
-
-      if (_isFirebaseListening) {
-        _addLog('Firebase', '接続成功: 監視を開始しました', true);
-      } else {
-        _addLog('Firebase', '接続失敗: 設定を確認してください。手動シミュレーションをご利用いただけます。', false);
-      }
-    }
-  }
+  // Firebase監視（未使用のためコメントアウト。ポーリング方式に移行済み）
+  // void _toggleFirebaseListener() async {
+  //   if (_isFirebaseListening) {
+  //     await _firebaseService.dispose();
+  //     setState(() { _isFirebaseListening = false; });
+  //     _addLog('Firebase', '監視を停止しました', true);
+  //   } else {
+  //     _addLog('Firebase', '接続初期化中...', true);
+  //     _apiService.setBaseUrl(_flaskUrlController.text.trim());
+  //     await _firebaseService.initialize(
+  //       databaseUrl: _firebaseUrlController.text.trim(),
+  //       path: _firebasePathController.text.trim(),
+  //       onStressStatusChanged: (bool isActive) {
+  //         _handleStressStatusChange(isActive, isSimulated: false);
+  //       },
+  //     );
+  //     setState(() { _isFirebaseListening = _firebaseService.isInitialized; });
+  //     if (_isFirebaseListening) {
+  //       _addLog('Firebase', '接続成功: 監視を開始しました', true);
+  //     } else {
+  //       _addLog('Firebase', '接続失敗: 設定を確認してください。手動シミュレーションをご利用いただけます。', false);
+  //     }
+  //   }
+  // }
 
   // ポーリングを開始する
   void _startPolling() {
@@ -502,10 +493,10 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
       });
     }
 
-    // Firebaseの値を自動で false にリセットする
-    await FirebaseDatabase.instance
-      .ref(_firebasePathController.text.trim())
-      .set(false);
+    // Firebase未使用のためコメントアウト
+    // await FirebaseDatabase.instance
+    //   .ref(_firebasePathController.text.trim())
+    //   .set(false);
 
     // 音楽が止まった瞬間のログを　Flask → MongoDB へ送信する
     _sendEventToFlask('music_stopped', extraData: {
