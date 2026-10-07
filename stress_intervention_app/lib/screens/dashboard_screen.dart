@@ -388,13 +388,20 @@ class _DashboardScreenState extends State<DashboardScreen> with TickerProviderSt
   }
 
   // Flaskサーバーにイベントを送信
+  // user_id を常に含めることでFlask側のis_stressedを正しく同期できるようにする
   Future<void> _sendEventToFlask(String eventType, {Map<String, dynamic>? extraData}) async {
     _apiService.setBaseUrl(_flaskUrlController.text.trim());
     _addLog('MongoDB記録', '$eventType の送信を試行中...', true);
-    
+
+    final userId = _participantIdController.text.trim();
+    final mergedData = <String, dynamic>{
+      if (userId.isNotEmpty) 'user_id': userId,
+      ...?extraData,
+    };
+
     bool success = await _apiService.logStressEvent(
       eventType: eventType,
-      extraData: extraData,
+      extraData: mergedData.isEmpty ? null : mergedData,
     );
 
     if (success) {
